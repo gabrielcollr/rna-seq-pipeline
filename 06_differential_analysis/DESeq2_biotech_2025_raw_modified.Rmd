@@ -1,0 +1,520 @@
+---
+title: "DESeq2_biotech"
+author: "Sara González Bodí y Laura Rodriguez Casillas"
+date: '`r format(Sys.time(), "%d %B, %Y")`'
+output: 
+  pdf_document:
+    latex_engine: xelatex
+    toc: yes
+  html_notebook:
+    code_folding: hide
+    fig_caption: yes
+    number_sections: yes
+    theme: paper
+    toc: true
+    toc_float: yes
+  html_document:
+    code_folding: hide
+    fig_caption: yes
+    number_sections: yes
+    theme: paper
+    toc: true
+    toc_float: yes
+editor_options: 
+  markdown: 
+  wrap: sentence
+---
+
+# Important web tutorials/manuals
+1. DESeq2: https://bioconductor.org/packages/devel/bioc/vignettes/DESeq2/inst/doc/DESeq2.html
+2. Gene Ontology with ClusterProfiler: https://yulab-smu.top/biomedical-knowledge-mining-book/clusterprofiler-go.html
+
+# Installation packages
+```{r, echo = FALSE}
+# ---------------------------
+# Define Required Packages
+# ---------------------------
+
+# CRAN packages
+required_packages_std <- c("ggpubr", "ggplot2", "dplyr", "tidyverse", "gplots", "RColorBrewer") # Here, as a change, we added also gplots and RColorBrewer as they are going to be used later
+
+# Bioconductor packages
+required_packages_bio <- c("biomaRt", "clusterProfiler", "DESeq2", "org.Hs.eg.db", "AnnotationDbi", "GO.db", "amap")
+
+# ---------------------------
+# Install Missing CRAN Packages
+# ---------------------------
+installed_packages <- rownames(installed.packages())
+
+for (pkg in required_packages_std) {
+  if (!(pkg %in% installed_packages)) {
+    message(sprintf("Installing CRAN package: %s", pkg))
+    install.packages(pkg, dependencies = TRUE)
+  }
+}
+
+# ---------------------------
+# Ensure BiocManager Is Available
+# ---------------------------
+if (!requireNamespace("BiocManager", quietly = TRUE)) {
+  message("Installing BiocManager package...") # Additional line added to improve the communication with the user
+  install.packages("BiocManager")
+}
+
+# ---------------------------
+# Install Missing Bioconductor Packages
+# ---------------------------
+for (pkg in required_packages_bio) {
+  if (!(pkg %in% installed_packages)) {
+    message(sprintf("Installing Bioconductor package: %s", pkg))
+    BiocManager::install(pkg, ask = FALSE, update = TRUE)
+  }
+}
+
+# ---------------------------
+# Load All Packages
+# ---------------------------
+suppressPackageStartupMessages({
+  library(biomaRt)          # Query Ensembl BioMart databases
+  library(clusterProfiler) # Functional enrichment analysis
+  library(DESeq2)          # Differential expression analysis
+  library(ggpubr)           # Publication-ready ggplot enhancements
+  library(ggplot2)          # Core plotting package
+  library(dplyr)            # Data manipulation
+  library(tidyverse)        # Data manipulation
+  library(amap)             # To do Hierarchical clustering
+  library(RColorBrewer)     # Needed to custom colors for heatmap
+  library(gplots)           # To plot heatmap.2
+  library(org.Hs.eg.db)     # Human orgDB used for GO annotation
+  library(AnnotationDbi)    # Needed by clusterProfiler to run GO annotation
+  library(GO.db)            # Needed by clusterProfiler to run GO annotation
+})
+
+
+message("✅ All packages loaded successfully.")
+```
+
+# Get the paths for all the directories and read the files needed
+```{r}
+#   Directory where the counts files are stored
+#     In case you work with htseq counts output
+# counts_directory <- ""
+#     In case you work with feature counts output
+counts_directory <- "C:/Users/nbarr/Documents/Uni/Programacion/Trabajo/05"
+#   Output directory 
+output_directory <- "C:/Users/nbarr/Documents/Uni/Programacion/Trabajo/06"
+#   Table with metadata (you have to create it by your own)
+fullsamples <- read.csv("C:/Users/nbarr/Documents/Uni/Programacion/Trabajo/06/metadata.csv")
+
+# Finally, if the output directory does not exist, create it
+if (! dir.exists(output_directory)){ dir.create(output_directory, recursive = TRUE)}
+```
+
+# ONLY RUN FOR HTSeq-counts OUTPUTS
+##   Upload data for HTSeq-count users and create DESeq object
+```{r}
+# As we used featureCounts, we are going to make this whole chunk a comment
+# # Get the samples files sorted and their names
+# sampleFiles <- sort(list.files(counts_directory, pattern = "*.counts"))
+# 
+# # Get the samples names
+# get.sample.name <- function(fname) strsplit(basename(fname), ".counts")[[1]][1]
+# sample.names <- unname(sapply(sampleFiles, get.sample.name))
+# 
+# # Create a table with the samples and files names 
+# sampleTable <- data.frame(sampleName = sample.names,
+# 		                      fileName = sampleFiles)
+# 
+# # Merge the samples table with the samples information 
+# merge <- merge(sampleTable, fullsamples, 
+#                by.x="sampleName", by.y = "SampleID")
+# 
+# ## Create the DESeq dataset object from HTSeq count files
+# ddsHTSeq <- DESeqDataSetFromHTSeqCount(sampleTable = merge, 
+#                                        directory = counts_directory, design = ~Condition)
+```
+
+# ONLY RUN FOR FeatureCounts OUTPUTS
+##  Upload data for FeatureCounts users and create DESeq object
+```{r}
+# Alternative code
+# We modified the code in this steps as our result from featureCounts was already a table with all the samples' data, instead of separate tables for each sample
+# We still need a list with all the sample names
+# So, we are going to obtain them from the .tsv file given by featureCounts
+# We obtain the absolute path
+countFile <- file.path(counts_directory, "results.tsv")
+
+# We create a table with all the information inside the file
+countTable <- read.delim(countFile, header = TRUE, comment.char="#", row.names = 1)
+
+# From the table, we take the name of the files used for featureCounts, which are written in the header
+sampleFiles <- colnames(countTable)[6:ncol(countTable)]
+
+# Alternative code
+# Once we have the absolute path, we extract the name of the samples 
+# To take the name we just need to extract the last 15 characters except the extension .bam
+# To do so, we use de function substr() which extracts a substring from de original one
+# The way it works is substr(original_string, initial_position, final_position_of_the_substring)
+get.sample.name <- function(fname) substr(fname, nchar(fname) - 14, nchar(fname) - 4)
+sample.names <- unname(sapply(sampleFiles, get.sample.name))
+
+# We create the matrix with the genes as rows and the counts for each sample as columns
+countData <- countTable[, 6:ncol(countTable)]
+
+# We create the names for the rows and the columns
+rownames(countData) <- rownames(countTable)
+colnames(countData) <- sample.names
+
+# Make sure the name of samples from fullsamples matches the order of columns in countData
+fullsamples <- fullsamples[match(colnames(countData), fullsamples$SampleID), ]
+
+# Check if the dimensions match
+if (ncol(countData) == nrow(fullsamples)) {
+    print("Sample count matches!")
+} else {
+    stop("Number of samples does not match between countData and fullsamples")
+}
+
+# Ensure that 'Condition' is a factor (it should already be, but let's ensure)
+fullsamples$Condition <- factor(fullsamples$Condition)
+
+# Create the DESeqDataSet
+ddsHTSeq <- DESeqDataSetFromMatrix(countData = countData, colData = fullsamples,
+                              design = ~Condition)
+
+# Check the DESeqDataSet object
+ddsHTSeq
+
+
+# We leave here the original code just in case
+# # Get the samples files sorted and their names
+# # This step was modified from the original code as our featurecounts results consisted of just one table with all the samples
+# # We are going to obtain the name of the samples from the metadata.tsv
+# sampleFiles <- sort(list.files(counts_directory, pattern = "*.txt"))
+# 
+# # Get the samples names
+# get.sample.name <- function(fname) strsplit(basename(fname), ".txt")[[1]][1]
+# sample.names <- unname(sapply(sampleFiles, get.sample.name))
+# 
+# # Create a table with the samples and files names 
+# sampleTable <- data.frame(sampleName = sample.names,
+#                           fileName = sampleFiles)
+# 
+# # Merge the samples table with the samples information 
+# merge <- merge(sampleTable, fullsamples, 
+#                by.x="sampleName", by.y = "SampleID")
+# 
+# # Order the merged table by sampleName
+# merge <- merge[order(merge$sampleName, decreasing = TRUE),]
+# 
+# # Initialize an empty variable to store counts for each sample
+# countData <- NULL
+# 
+# # Loop through each sample file and read the featureCounts files
+# for (i in 1:length(sampleFiles)) {
+#     # Get the complete path to the featureCounts file we are iterating over
+#     countFile <- file.path(counts_directory, sampleFiles[i])
+#     # Read the featureCounts output file
+#     countTable <- read.delim(countFile, header = TRUE, comment.char="#", row.names = 1)
+#     # Extract the correct count column (usually the last column, but this can vary)
+#     countColumn <- countTable[, ncol(countTable)]
+#     # Add the count column to the countData matrix, preserving row names (gene names)
+#     if (is.null(countData)) {
+#         countData <- countColumn
+#     } else {
+#         countData <- cbind(countData, countColumn)
+#     }
+# }
+# 
+# # Set the row names of countData to the gene names (from the first file, assumed to be the same across all files)
+# rownames(countData) <- rownames(countTable)
+# 
+# # Set the column names for the countData matrix to the sample names
+# colnames(countData) <- sample.names
+# 
+# # Make sure the merge DataFrame matches the order of columns in countData
+# merge <- merge[match(colnames(countData), merge$sampleName), ]
+# 
+# # Check if the dimensions match
+# if (ncol(countData) == nrow(merge)) {
+#     print("Sample count matches!")
+# } else {
+#     stop("Number of samples does not match between countData and merge")
+# }
+# 
+# # Ensure that 'Condition' is a factor (it should already be, but let's ensure)
+# merge$Condition <- factor(merge$Condition)
+# 
+# # Create the DESeqDataSet
+# ddsHTSeq <- DESeqDataSetFromMatrix(countData = countData, colData = merge,
+#                               design = ~Condition)
+# 
+# # Check the DESeqDataSet object
+# ddsHTSeq
+```
+
+# Prefiltering options before running DESeq2
+```{r}
+# Perform a minimal pre-filtering to keep only rows that have at least 10 (decided below) reads total
+
+# Sum count for each gene across samples
+sumcounts <- rowSums(counts(ddsHTSeq))
+
+#   take the log of the sum for each gene
+logsumcounts <- log(sumcounts,base=10)
+
+# 1st plot a histogram of the log scaled counts
+#     This will be useful in order to decide in which value keep the genes
+plot_without_filter <- hist(logsumcounts,breaks=100, main="Histogram of the log scaled counts")
+#   Get the genes with summed counts greater than 10! (This value could vary anytime you run another RNA-Seq analysis with other samples)
+
+#   This remove the lowly expressed genes
+keep <- sumcounts > 10
+#   Keep the genes which sumcounts > 10 from the ddsHTSeq object
+ddsHTSeq_filter <- ddsHTSeq[keep,]
+
+# Finally, do another histogram but this time with the filtered ddsHTSeq object
+sumcounts_filtered <- rowSums(counts(ddsHTSeq_filter))
+logsumcounts_filtered <- log(sumcounts_filtered,base=10)
+plot_with_filter <- hist(logsumcounts_filtered,breaks=100,main="Histogram of the log scaled counts \n keep only the genes with summed counts greater than 10" )
+```
+
+
+# Run the Differential Expression Analysis
+```{r fig.height=10, fig.width=10}
+# Run the Differential Expression Analysis
+dds <- DESeq(ddsHTSeq_filter)
+# Print the names of the results in the Differential Expression Analysis
+print  (resultsNames(dds))
+
+# IMPORTANT: the  following data transformation is only done for REPRESENTATION, 
+#   it is not meant to be used for analysis
+## Normalize the counts
+normalized_counts <- counts(dds, normalized=TRUE)
+
+## Log transform the normalized counts - Get the Median Absolute Deviation per gene (1 means by row)
+normalized_counts_mad <- apply(normalized_counts, 1, mad)
+## Order the normalized counts matrix using the Median Absolute Deviation
+normalized_counts <- normalized_counts[order(normalized_counts_mad, decreasing=T), ]
+
+## Another method to create a variance.stabilized transformed counts for visualization
+vsd <- vst(dds, blind=FALSE)
+
+rlogMat <- assay(vsd)
+rlogMat <- rlogMat[order(normalized_counts_mad, decreasing=T), ]
+
+## Hierarchical clustering
+hc <- hcluster(t(rlogMat), method="pearson")
+#   Get a dendogram to check for outliers
+TreeC = as.dendrogram(hc, method="average")
+plot(TreeC, main = "Sample Clustering-checking outliers ", ylab = "Height")
+
+# Estimate the pearson correlation to see it as a dendogram!
+pearson_cor <- as.matrix(cor(rlogMat, method="pearson"))
+hmcol <- colorRampPalette(brewer.pal(9, "RdPu"))(100) # This is to stablish the color palette. Alternative code. Here, we modified the color palette from the original one
+heatmap.2(pearson_cor, Rowv=as.dendrogram(hc), symm=T, trace="none",
+          col=hmcol, margins=c(8,5), main="Heatmap of Pearson Correlation Between Samples") # Alternative code. Here, we added a title to the heatmap
+
+# plot PCA
+plotPCA(vsd, intgroup="Condition")  +  ggtitle("PCA Plot of Variance Stabilizing Transformation") +
+geom_point(size = 1) +
+       theme(axis.line = element_line(colour = "black"),
+             plot.title = element_text(angle = 0, size = 14, face = 'bold', vjust = 0.5, hjust = 0.5), # title elements
+             plot.subtitle = element_blank(), plot.caption = element_blank(), # subtitle elements
+             
+             axis.text.x = element_text(angle = 0, size = 12, vjust = 1), # x axis title
+             axis.text.y = element_text(angle = 0, size = 12, vjust = 0.5), # y axis title
+             axis.title = element_text(size = 13), # both axis titles
+             
+             legend.position = 'right', legend.key.size = unit(0.5, 'cm'), # legend position
+             legend.text = element_text(size = 12), legend.title = element_blank())  + # legend text
+       theme_bw() +
+       theme(
+         panel.grid.minor = element_blank(),
+         panel.grid.major = element_blank(),
+         panel.border = element_rect(size = 0.20),
+         axis.title.x = element_text(size=11),
+         axis.title.y = element_text(size = 11, margin = margin(t = 0, r = 10, b = 0, l = 0)),
+         axis.text.x = element_text(color="black",size=10),
+         axis.text.y = element_text(color="black",size=10),
+         legend.position = "right") +
+       theme(plot.title = element_text(hjust = 0.5)) 
+```
+
+# Comparison: run DESeq2 for the comparison --> altered vs control
+## Create DESeq2 dataset object
+```{r}
+# What sample is the reference in our analysis?
+ref <- "LowGlucose"
+
+# Relabel the filtered DESeq2 object by the reference in the specific analysis
+ddsHTSeq_filter$Condition <- relevel(ddsHTSeq_filter$Condition, ref = ref)
+
+## Normalize and calculate dispersion with the reference of the specific analysis
+dds <- DESeq(ddsHTSeq_filter) # <- normalize and calculate dispersion
+print  (resultsNames(dds))
+
+# Get the comparison results including the condition
+paired_comparison_results <- results(dds,  name="Condition_HighGlucose_vs_LowGlucose", pAdjustMethod="BH") # Alternative code. Here we changed the name to put first HighGlucose as the reference is LowGlucose (it was written the other way round)
+#   Custom the output comparison
+paired_comparison_results_tb <-  paired_comparison_results %>% data.frame() %>%
+rownames_to_column(var="gene") %>% as_tibble()
+
+# Store the output comparison data frame to a csv file
+#   Create the name for the output folder
+comparison_name_folder <- "Condition_HighGlucose_vs_LowGlucose" # Alternative code. Here, we also changed the name of the two conditions to match the resultsNames(dds)
+#   Get the complete path to store the output and create the directory if it does not already exists
+output_path <- file.path(output_directory, comparison_name_folder)
+if (!dir.exists(output_path)) {dir.create(file.path(output_path), recursive = TRUE)}
+
+# Applying normalization to data (ignoring design) - for clustering, etc.
+dataf <- vst(dds, blind = TRUE) %>% assay()
+dataf <- dataf %>% as_tibble(rownames = "gene")
+
+# Set the thresholds where you want to filter your data
+padj.cutoff <- 0.01
+lfc.cutoff <- log2(1.5) # Alternative code. We changed de way log2 is presented to make it clearer
+
+# Merge the output table from the comparison with the counts (dataf)
+#   Add also another column that includes TRUE/FALSE in case the gene pass the thresholds set
+resdata <- merge(as.data.frame(paired_comparison_results_tb), as.data.frame(dataf), by = 'gene', sort = FALSE) %>% mutate(Threshold_padj_0.01_logFC_0.58 = case_when(padj < padj.cutoff & abs(log2FoldChange) > lfc.cutoff ~ "TRUE",  TRUE ~ "FALSE")) # %>% equivale a un pipe. Si cambiamos padj, cambiarlo aquí también
+
+# Write the complete table to the output folder
+write.table(resdata, file =  paste(output_path, (paste0(comparison_name_folder, "_final_results.csv")), sep = "/"), sep = ',', row.names = FALSE)
+```
+
+# Useful plots for Differential Expression Analysis
+```{r}
+# Create MA plot
+plotMA(dds)
+title (main = "MA plot") # Alternative code to add a title to the MA plot
+
+# Create a volcano plot
+#   Add a variable to resdata to include UP/DOWN or NOT taking into account the thresholds
+resdata$change <- as.factor(ifelse(
+  is.na(resdata$padj) | resdata$padj > padj.cutoff,
+  'NOT',
+  ifelse(resdata$padj <= padj.cutoff & abs(resdata$log2FoldChange) > lfc.cutoff, 
+         ifelse(resdata$log2FoldChange > lfc.cutoff, 'UP', 'DOWN'),
+         'NOT')))
+#   Create the plot
+volcanoPlot = ggplot(data=resdata, aes(x=log2FoldChange, y=-log10(padj), color=change)) + 
+              geom_point(alpha=0.4, size=1.75) + 
+              theme_set(theme_set(theme_bw(base_size=20)))+
+              xlab("log2 fold change") + ylab("-log10 FDR corrected p-value") +
+              ggtitle( "Volcano Plot"  ) + theme(plot.title = element_text(size=15,hjust = 0.5))+
+              scale_colour_manual(values = c('blue','black','red'))  ## corresponding to the levels(res$change)
+# This is to show the plot
+show(volcanoPlot)
+
+```
+
+# Gene Ontology enrichment annotation with ClusterProfiler
+```{r}
+# We need to get the Universe of genes or background genes
+background_genes <- as.vector(resdata$gene)
+
+# We need to get the significant genes in the DEGs (Differentially Expressed Genes)
+interesting_set <- resdata %>% filter (abs(log2FoldChange) >= lfc.cutoff & padj <= padj.cutoff) 
+interesting_set <- as.vector(interesting_set$gene)
+
+# Run the Gene Ontology Enrichment analysis
+enrichment <- enrichGO(gene = interesting_set, # DEGs list
+                     OrgDb = org.Hs.eg.db, # organism
+                     keyType = "ENSEMBL", # The name included in your backgroud/interesting set
+                     ont = "BP", # The analysis you want to run: CC, BP, MF
+                     pvalueCutoff = 0.01, # Adjusted pvalue Cutoff on enrichment test to report
+                     pAdjustMethod = "BH", # Method for the p.adjusted to be calculated
+                     universe = background_genes, # the backgroud genes
+                     qvalueCutoff = 0.05)
+
+# Get the result from the enrichment as a data frame
+ora_analysis_bp_df <- as.data.frame(enrichment@result)
+
+# Alternative code
+# We want to export this table to the output folder
+output_table <- "C:/Users/nbarr/Documents/Uni/Programacion/Trabajo/06/Functional_Analysis_GO_BP.csv"
+write.table(ora_analysis_bp_df, file =  output_table, sep = ',', row.names = FALSE)
+
+
+# Get the representation of the Gene Ontology
+barplot <-barplot(enrichment, 
+                    showCategory = 100, 
+                    font.size = 8,) + 
+            ggtitle("GO - Ontology ") 
+
+  
+show(barplot)
+
+```
+```{r}
+# Alternative code
+# We are going to add at the end a little code to download all the plots created
+# All of them will be saved in a folder named "plots"
+dir.create("plots", showWarnings = FALSE)
+
+# Now we go one by one
+
+# Histogram of the log scaled counts without filter
+# Open the image
+png("plots/Histogram_without_filter.png", width=800, height=600)
+# Generate the image
+hist(logsumcounts,breaks=100, main="Histogram of the log scaled counts")
+# Close the image
+dev.off()
+
+# Histogram of the log scaled counts with filter
+png("plots/Histogram_with_filter.png", width=800, height=600)
+hist(logsumcounts_filtered,breaks=100,main="Histogram of the log scaled counts \n keep only the genes with summed counts greater than 10" )
+dev.off()
+
+# Hierarchical clustering dendrogram
+png("plots/Dendrogram.png", width=800, height=600)
+plot(TreeC, main = "Sample Clustering-checking outliers ", ylab = "Height")
+dev.off()
+
+# Heatmap
+png("plots/Heatmap.png", width=800, height=600)
+heatmap.2(pearson_cor, Rowv=as.dendrogram(hc), symm=T, trace="none",
+          col=hmcol, margins=c(8,5), main="Heatmap of Pearson Correlation Between Samples")
+dev.off()
+
+# PCA
+pca_plot <- plotPCA(vsd, intgroup="Condition")  +  ggtitle("PCA Plot of Variance Stabilizing Transformation") +
+geom_point(size = 1) +
+       theme(axis.line = element_line(colour = "black"),
+             plot.title = element_text(angle = 0, size = 14, face = 'bold', vjust = 0.5, hjust = 0.5), # title elements
+             plot.subtitle = element_blank(), plot.caption = element_blank(), # subtitle elements
+             
+             axis.text.x = element_text(angle = 0, size = 12, vjust = 1), # x axis title
+             axis.text.y = element_text(angle = 0, size = 12, vjust = 0.5), # y axis title
+             axis.title = element_text(size = 13), # both axis titles
+             
+             legend.position = 'right', legend.key.size = unit(0.5, 'cm'), # legend position
+             legend.text = element_text(size = 12), legend.title = element_blank())  + # legend text
+       theme_bw() +
+       theme(
+         panel.grid.minor = element_blank(),
+         panel.grid.major = element_blank(),
+         panel.border = element_rect(size = 0.20),
+         axis.title.x = element_text(size=11),
+         axis.title.y = element_text(size = 11, margin = margin(t = 0, r = 10, b = 0, l = 0)),
+         axis.text.x = element_text(color="black",size=10),
+         axis.text.y = element_text(color="black",size=10),
+         legend.position = "right") +
+       theme(plot.title = element_text(hjust = 0.5))
+ggsave("plots/PCA_plot.png", pca_plot) # Here we use ggplot2, that needs to have previously stored the plot in a variable
+
+# MA
+png("plots/MA.png", width=800, height=600)
+plotMA(dds)
+dev.off()
+
+# Volcano plot
+ggsave("plots/volcano_plot.png", volcanoPlot, width=8, height=6, dpi=300) # This one is using ggplot2
+
+# Gene ontology barplot
+ggsave("plots/barplot_GO.png", barplot, width=10, height=8, dpi=300)
+
+```
+
