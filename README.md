@@ -1,4 +1,4 @@
-# GN\_01
+# RNA-Seq Pipeline
 
 Tool to perform a complete RNA-seq bioinformatic analysis from the raw reads obtained in the sequencing process to the differential expression analysis of the samples. It includes all the different steps divided in different folders. 
 
@@ -8,11 +8,9 @@ Finished in June 2025
 
 # Installation
 
-You just need to download the GN\_01 complete compressed folder and decompress it using the following command:
+All scripts are available in this GitHub repository. The complete folder, containing all scripts, is also available, and can be downloaded and decompressed using the following command:
 
 tar \-xzvf [GN01.tar.gz](http://GN01.tar.gz)
-
-Another way is fetching the scripts independently from this GitHub repository.
 
 In order to execute all the scripts successfully, we created a conda environment named gabner, containing all the necessary dependencies and programs. It is located in the CBGP (Centro de Biotecnología y Genómica de Plantas, UPM-INIA, Madrid, Spain) cluster. So, in order to activate this environment, you should type: 
 
