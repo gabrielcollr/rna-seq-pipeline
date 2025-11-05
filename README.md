@@ -10,7 +10,9 @@ You just need to download the GN\_01 complete compressed folder and decompress i
 
 tar \-xzvf [GN01.tar.gz](http://GN01.tar.gz)
 
-In order to execute all the scripts successfully, we created a conda environment named gabner, containing all the necessary dependencies and programs. It is located in the CBGP cluster. So, in order to activate this environment, you should type: 
+Another way is fetching the scripts independently from this GitHub repository.
+
+In order to execute all the scripts successfully, we created a conda environment named gabner, containing all the necessary dependencies and programs. It is located in the CBGP (Centro de Biotecnología y Genómica de Plantas, UPM-INIA, Madrid, Spain) cluster. So, in order to activate this environment, you should type: 
 
 conda activate /data/2025/grado-biotech/gabriel.coll/miniforge3/envs/gabner
 
