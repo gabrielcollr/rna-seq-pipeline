@@ -4,6 +4,8 @@ Tool to perform a complete RNA-seq bioinformatic analysis from the raw reads obt
 
 ***Authors:** Nerea Barrio Cabezas and Gabriel Coll Rieffel*
 
+Finished in June 2025
+
 # Installation
 
 You just need to download the GN\_01 complete compressed folder and decompress it using the following command:
